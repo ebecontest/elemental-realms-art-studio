@@ -28,30 +28,50 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ZIP_FILE="$(find . -maxdepth 1 -type f -name 'Elemental_Realms_Art_Studio_v*.zip' -printf '%f\n' | sort -V | tail -n 1)"
+
+          ZIP_FILE="$(find . -maxdepth 1 -type f \
+            \( -name 'Elemental_Realms_Art_Studio_v*.zip' \
+            -o -name 'Elemental_Realms_Art_Studio*_v*.zip' \) \
+            -printf '%f\n' | sort -V | tail -n 1)"
+
           if [ -z "$ZIP_FILE" ]; then
-            echo "No release ZIP found. Expected Elemental_Realms_Art_Studio_v*.zip in the repository root."
+            echo "ERROR: No Art Studio release ZIP found."
+            echo "Expected: Elemental_Realms_Art_Studio*_v*.zip"
             exit 1
           fi
-          echo "Using release: $ZIP_FILE"
+
+          echo "Selected release: $ZIP_FILE"
           echo "zip_file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Extract newest release
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p extracted
           unzip -q "${{ steps.release.outputs.zip_file }}" -d extracted
+          echo "ZIP extracted successfully."
 
       - name: Locate application package
         id: app
         shell: bash
         run: |
           set -euo pipefail
-          PACKAGE_FILE="$(find extracted -maxdepth 4 -type f -name package.json -print -quit)"
+
+          PACKAGE_FILE="$(find extracted -maxdepth 5 \
+            -type f -name package.json -print -quit)"
+
           if [ -z "$PACKAGE_FILE" ]; then
-            echo "Could not find package.json inside the release ZIP."
+            echo "ERROR: package.json not found inside ZIP."
             exit 1
           fi
+
           APP_DIR="$(dirname "$PACKAGE_FILE")"
+
+          if [ ! -f "$APP_DIR/package-lock.json" ]; then
+            echo "ERROR: package-lock.json not found in $APP_DIR"
+            exit 1
+          fi
+
           echo "Application directory: $APP_DIR"
           echo "app_dir=$APP_DIR" >> "$GITHUB_OUTPUT"
 
@@ -67,6 +87,20 @@ jobs:
 
       - name: Build application
         run: npm run build --prefix "${{ steps.app.outputs.app_dir }}"
+
+      - name: Verify build output
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DIST_DIR="${{ steps.app.outputs.app_dir }}/dist"
+
+          if [ ! -f "$DIST_DIR/index.html" ]; then
+            echo "ERROR: dist/index.html was not generated."
+            exit 1
+          fi
+
+          echo "Build verification successful."
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
