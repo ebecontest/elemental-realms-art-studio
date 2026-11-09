@@ -1,4 +1,3 @@
-
 name: Deploy ELEMENTAL REALMS Art Studio
 
 on:
@@ -24,31 +23,58 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract Art Studio ZIP
+      - name: Find newest Art Studio release ZIP
+        id: release
+        shell: bash
         run: |
-          mkdir extracted
-          unzip -q Elemental_Realms_Art_Studio_Browser_Ready_v1.2.1.zip -d extracted
+          set -euo pipefail
+          ZIP_FILE="$(find . -maxdepth 1 -type f -name 'Elemental_Realms_Art_Studio_v*.zip' -printf '%f\n' | sort -V | tail -n 1)"
+          if [ -z "$ZIP_FILE" ]; then
+            echo "No release ZIP found. Expected Elemental_Realms_Art_Studio_v*.zip in the repository root."
+            exit 1
+          fi
+          echo "Using release: $ZIP_FILE"
+          echo "zip_file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Extract newest release
+        run: |
+          mkdir -p extracted
+          unzip -q "${{ steps.release.outputs.zip_file }}" -d extracted
+
+      - name: Locate application package
+        id: app
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE_FILE="$(find extracted -maxdepth 4 -type f -name package.json -print -quit)"
+          if [ -z "$PACKAGE_FILE" ]; then
+            echo "Could not find package.json inside the release ZIP."
+            exit 1
+          fi
+          APP_DIR="$(dirname "$PACKAGE_FILE")"
+          echo "Application directory: $APP_DIR"
+          echo "app_dir=$APP_DIR" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ steps.app.outputs.app_dir }}/package-lock.json
 
       - name: Install dependencies
-        run: npm ci --prefix extracted/elemental-realms-art-studio
+        run: npm ci --prefix "${{ steps.app.outputs.app_dir }}"
 
       - name: Build application
-        run: npm run build --prefix extracted/elemental-realms-art-studio
+        run: npm run build --prefix "${{ steps.app.outputs.app_dir }}"
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - name: Upload website
         uses: actions/upload-pages-artifact@v3
         with:
-          path: extracted/elemental-realms-art-studio/dist
+          path: ${{ steps.app.outputs.app_dir }}/dist
 
       - name: Deploy website
         uses: actions/deploy-pages@v4
